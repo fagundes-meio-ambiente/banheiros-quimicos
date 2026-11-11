@@ -515,6 +515,22 @@ main.com-barra{padding-bottom:calc(96px + env(safe-area-inset-bottom))!important
 .selbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--az-cl);border:1px solid #c9d8f5;position:sticky;top:64px;z-index:5}
 .impb h2{display:flex;align-items:center;gap:8px}.impb h2 svg.i{width:20px;height:20px;color:var(--az)}
 .impb{background:linear-gradient(135deg,#fff,#f1f5fd);border:1px dashed #b9cbef}
+@media(max-width:560px){.pill.off span{display:inline!important}.pill.off{background:#c93434!important;color:#fff!important}.pill.off i{background:#fff!important}}
+/* alerta de limpeza vencida */
+.alerta-limp{background:#fff;border:2px solid #f2b8b8;border-radius:16px;padding:12px;margin-bottom:16px;box-shadow:0 6px 18px rgba(201,52,52,.10)}
+.al-top{display:flex;gap:10px;align-items:center;margin-bottom:10px}
+.al-top>svg.i{width:30px;height:30px;color:#fff;background:#c93434;border-radius:10px;padding:5px;flex:none}
+.al-top b{display:block;color:#a52525;font-size:15.5px}.al-top small{color:var(--tx2);font-size:12px}
+.venc{background:#fff8f8;border:1px solid #f4d2d2;border-left:5px solid #e8a33c;border-radius:12px;padding:10px 12px;margin-bottom:8px}
+.venc.grave{border-left-color:#c93434}
+.venc .vt{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.venc .vb{font-size:12px;font-weight:800;color:#a52525;background:#fde4e4;border-radius:10px;padding:2px 9px;white-space:nowrap}
+.venc .vl{display:flex;gap:8px;align-items:flex-start;margin:6px 0 4px}
+.venc .vl svg.i{width:20px;height:20px;color:#00379e;flex:none;margin-top:1px}
+.venc .vl b{display:block;font-size:14px}.venc .vl small{color:var(--tx2);font-size:12px}
+.vgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px}
+.vgrid .venc{margin:0}
+nav.bot button{min-width:0}
 
 </style>
 </head>
@@ -531,7 +547,7 @@ main.com-barra{padding-bottom:calc(96px + env(safe-area-inset-bottom))!important
    Perfis: LANÇADOR (lança, consulta status e histórico) e
            ADMINISTRADOR (vê tudo: painel, cadastros, relatórios).
    ===================================================================== */
-const APP_VERSION='1.5.0';
+const APP_VERSION='1.7.0';
 const TURNOS=['Diurno','Noturno'];
 const TURNOS_EQ=['Diurno','Noturno','ADM'];
 const PERFIS=['LANÇADOR','ADMINISTRADOR'];
@@ -713,8 +729,9 @@ function doSrv(x){return {id:x.id,numero:x.numero,tipo:x.tipo,tag:normTag(x.tag)
 function doFila(r){const d=r.dados;return {...d,id:r.id,numero:r.numero,lancadoEm:r.criadoEm,lancadoPor:r.autor&&r.autor.nome,matriculaLanc:r.autor&&r.autor.matricula,status:'ATIVO',st:r.status,erro:r.erro,local:true,fotos:d.fotos||[],qtdFotos:(d.fotos||[]).length};}
 function registros(){return memo('regs',registros0);}
 function registros0(){
- const m=new Map();S.srvRegs.forEach(x=>m.set(x.id,doSrv(x)));
- S.fila.forEach(r=>{if(r.tipo==='REGISTRO'&&!m.has(r.id))m.set(r.id,doFila(r));});
+ const apag=new Set();S.fila.forEach(r=>{if(r.tipo==='APAGAR'&&r.status!=='rejeitado')(r.dados.ids||[]).forEach(i=>apag.add(i));});
+ const m=new Map(),noSrv=new Set();S.srvRegs.forEach(x=>{noSrv.add(x.id);if(x.status!=='APAGADO'&&!apag.has(x.id))m.set(x.id,doSrv(x));});
+ S.fila.forEach(r=>{if(r.tipo==='REGISTRO'&&!m.has(r.id)&&!apag.has(r.id)&&!noSrv.has(r.id))m.set(r.id,doFila(r));});
  const excl=new Map(S.fila.filter(r=>r.tipo==='EXCLUSAO'&&r.status!=='rejeitado').map(r=>[r.dados.ref,r]));
  const out=[...m.values()].map(x=>{x.ini=msDe(x.data,x.inicio);x.fimMs=x.ini+((x.duracaoMin||0)*60000);if(excl.has(x.id)&&x.status==='ATIVO'){x.status='EXCLUÍDO';x.excluidoPor=excl.get(x.id).autor.nome;x.motivoExclusao=excl.get(x.id).dados.motivo;}return x;});
  out.sort((a,b)=>b.ini-a.ini);return out;}
@@ -783,8 +800,8 @@ async function sincronizar(manual){
   await recarregarFila();
   /* 1) lançamentos e cadastros, na ordem em que foram feitos */
   const pend=S.fila.filter(r=>r.status==='pendente');
-  for(let i=0;i<pend.length;i+=20){
-   const lote=pend.slice(i,i+20);
+  for(let i=0;i<pend.length;i+=50){
+   const lote=pend.slice(i,i+50);
    const res=await api({action:'sync',deviceId:S.deviceId,records:lote.map(paraEnvio)},90000);
    const acks=new Set(res.acks||[]),rej={};(res.rejeitados||[]).forEach(x=>rej[x.id]=x.motivo);
    const mud=[];for(const r of lote){
@@ -805,7 +822,7 @@ async function sincronizar(manual){
   await podar();
   if(manual)toast(recusados?`${recusados} item(ns) recusado(s) pelo servidor — veja em Fila de envio`:(enviados||fotos)?`${enviados} lançamento(s) e ${fotos} foto(s) enviados e confirmados`:'Tudo sincronizado',recusados?'erro':'ok');
  }catch(e){S.lastErr=e.message;if(manual||/Chave de acesso|não autorizado/i.test(e.message))toast('Não sincronizou: '+e.message+' — nada foi perdido.','erro');}
- finally{S.syncing=false;renderStatus();if(mudou){invalidar();redesenharSePuder();}}}
+ finally{S.syncing=false;renderStatus();if(mudou){invalidar();redesenharSePuder();}verificarAlertas();}}
 
 async function baixarCadastro(){const c=await api({action:'cadastro'});if(Array.isArray(c.equipe)){S.equipeSrv=c.equipe;await setMeta('equipe',c.equipe);}if(c.config){S.configSrv=c.config;await setMeta('config',c.config);}}
 const assin=o=>JSON.stringify(o);
@@ -837,7 +854,7 @@ async function podar(){const lim=Date.now()-30*864e5,limF=Date.now()-15*864e5;
  const velhos=S.fila.filter(r=>r.status==='sincronizado'&&r.sincronizadoEm&&r.sincronizadoEm<lim).map(r=>r.id);if(velhos.length)await apaga('fila',velhos);
  const fts=(await todos('fotos')).filter(f=>f.enviada&&f.data&&f.enviadaEm<limF);if(fts.length)await grava('fotos',fts.map(f=>({...f,data:null})));
  await recarregarFila();}
-function redesenharSePuder(){const a=document.activeElement;if(a&&/INPUT|TEXTAREA|SELECT/.test(a.tagName)&&a.closest('#app'))return;if(!S.user){if(!$('#lgMat')||!$('#lgMat').value)render();return;}if(S.tela==='form')return;render();}
+function redesenharSePuder(){const a=document.activeElement;if(a&&/INPUT|TEXTAREA|SELECT/.test(a.tagName)&&root.contains(a))return;if(document.querySelector('.modal'))return;if(S.user&&S.user.trocar)return;if(!S.user){if(!$('#lgMat')||!$('#lgMat').value)render();return;}if(S.tela==='form')return;render();}
 
 /* ------------------------------ Fotos: compressão ------------------------------ */
 function lerImagem(file){return new Promise((res,rej)=>{const u=URL.createObjectURL(file),img=new Image();img.onload=()=>{URL.revokeObjectURL(u);res(img);};img.onerror=()=>{URL.revokeObjectURL(u);rej(new Error('Imagem inválida'));};img.src=u;});}
@@ -895,11 +912,11 @@ async function sair(semPerguntar){
 
 /* ------------------------------ Estrutura ------------------------------ */
 const root=$('#root');
-const NAV_ADM=[['painel','Painel gerencial','chart'],['status','Status dos banheiros','layers'],['lancar','Registrar atividade','plus'],['historico','Histórico e relatórios','list'],['banheiros','Cadastro de banheiros','toilet'],['frentes','Frentes de serviço','map'],['equipe','Equipe','users'],['fila','Fila de envio','clock'],['config','Configurações','gear']];
+const NAV_ADM=[['painel','Painel gerencial','chart'],['vencidos','Limpezas vencidas','alert'],['status','Status dos banheiros','layers'],['lancar','Registrar atividade','plus'],['historico','Histórico e relatórios','list'],['banheiros','Cadastro de banheiros','toilet'],['frentes','Frentes de serviço','map'],['equipe','Equipe','users'],['fila','Fila de envio','clock'],['config','Configurações','gear']];
 const NAV_ADM_MOB=[['painel','Painel','chart'],['status','Status','layers'],['lancar','Registrar','plus'],['historico','Histórico','list'],['mais','Mais','gear']];
-const NAV_LAN=[['lancar','Registrar','plus'],['status','Status','layers'],['historico','Histórico','list'],['fila','Fila','clock']];
-const TIT={painel:'Painel gerencial',status:'Status dos banheiros',lancar:'Registrar atividade',form:'Registro de limpeza e reparo',historico:'Histórico e relatórios',banheiros:'Cadastro de banheiros',frentes:'Frentes de serviço',equipe:'Equipe',fila:'Fila de envio',config:'Configurações',mais:'Mais opções',banheiro:'Histórico do banheiro',registro:'Detalhe do registro'};
-function telasPermitidas(){return isAdm()?Object.keys(TIT):['lancar','form','status','historico','fila','banheiro','registro'];}
+const NAV_LAN=[['lancar','Registrar','plus'],['vencidos','Vencidos','alert'],['status','Status','layers'],['historico','Histórico','list'],['fila','Fila','clock']];
+const TIT={vencidos:'Limpezas vencidas',painel:'Painel gerencial',status:'Status dos banheiros',lancar:'Registrar atividade',form:'Registro de limpeza e reparo',historico:'Histórico e relatórios',banheiros:'Cadastro de banheiros',frentes:'Frentes de serviço',equipe:'Equipe',fila:'Fila de envio',config:'Configurações',mais:'Mais opções',banheiro:'Histórico do banheiro',registro:'Detalhe do registro'};
+function telasPermitidas(){return isAdm()?Object.keys(TIT):['vencidos','lancar','form','status','historico','fila','banheiro','registro'];}
 function ir(t,extra){Object.assign(S,{verId:null},extra||{});S.tela=t;render();window.scrollTo(0,0);}
 function render(){
  hideTip();
@@ -910,8 +927,8 @@ function render(){
  const nav=isAdm()?NAV_ADM:NAV_LAN,navM=isAdm()?NAV_ADM_MOB:NAV_LAN;
  const pend=S.fila.filter(r=>r.status!=='sincronizado').length;
  const atv=t=>S.tela===t||(S.tela==='form'&&t==='lancar')||(S.tela==='banheiro'&&t==='status')||(S.tela==='registro'&&t==='historico')||(t==='mais'&&['banheiros','frentes','equipe','fila','config'].includes(S.tela));
- const bd=t=>t==='fila'&&pend?`<span class="bdg">${pend}</span>`:'';
- const v={painel:vPainel,status:vStatus,lancar:vLancar,form:vForm,historico:vHistorico,banheiros:vBanheiros,frentes:vFrentes,equipe:vEquipe,fila:vFila,config:vConfig,mais:vMais,banheiro:vBanheiro,registro:vRegistro}[S.tela];
+ const nv=listaVencidos().length,bd=t=>t==='fila'&&pend?`<span class="bdg">${pend}</span>`:t==='vencidos'&&nv?`<span class="bdg">${nv>99?'99+':nv}</span>`:'';
+ const v={vencidos:vVencidos,painel:vPainel,status:vStatus,lancar:vLancar,form:vForm,historico:vHistorico,banheiros:vBanheiros,frentes:vFrentes,equipe:vEquipe,fila:vFila,config:vConfig,mais:vMais,banheiro:vBanheiro,registro:vRegistro}[S.tela];
  root.innerHTML=`<div class="app">${isAdm()?`<aside><div class="as-top">${MARCA()}<small>Banheiros Químicos</small></div>${nav.map(([k,l,i])=>`<button class="${atv(k)?'at':''}" data-act="nav" data-to="${k}">${ic(i)}<span>${l}</span>${bd(k)}</button>`).join('')}<div class="rod">Juntos temos um mundo para construir.</div></aside>`:''}
  <div class="col"><header><div class="logo">${MARCA()}</div><div class="htit"><b>${TIT[S.tela]||''}</b><span>Banheiros Químicos · ${h(S.cfg.unidade||'')}</span></div>
   <div class="pill" id="pill"><i></i><span></span></div>
@@ -923,7 +940,7 @@ function render(){
 function renderStatus(){const p=$('#pill');if(!p)return;const on=online();
  p.className='pill '+(S.syncing?'sync':on?'on':'off');
  const pend=S.fila.filter(r=>r.status==='pendente').length+S.fotosPend;
- p.querySelector('span').textContent=S.syncing?'Sincronizando…':on?(pend?`Online · ${pend} na fila`:'Online'):(pend?`Offline · ${pend} guardado(s)`:'Offline');}
+ p.querySelector('span').textContent=S.syncing?'Sincronizando…':on?(pend?`Online · ${pend} na fila`:'Online'):(pend?(innerWidth<=560?`Offline · ${pend}`:`Offline · ${pend} guardado(s)`):'Offline');}
 
 /* ------------------------------ Telas sem login ------------------------------ */
 function brandPanel(sub){return `<div class="lg-brand" style="background-image:linear-gradient(160deg,rgba(0,20,60,.94) 0%,rgba(0,45,130,.82) 45%,rgba(0,55,158,.45) 100%),url('${ASSET.foto}')"><div class="lg-top">${MARCA('xl')}</div>
@@ -962,6 +979,7 @@ function vLancar(){
  ${rej?`<div class="aviso">${ic('alert')}<div class="f1">${rej} item(ns) recusado(s) pelo servidor. <button class="btn sm" data-act="nav" data-to="fila" style="margin-left:6px">Ver</button></div></div>`:''}
  ${S.persist===false&&!window.DEMO_API?`<div class="aviso">${ic('alert')}<div>Instale o app na tela inicial e não limpe os dados do navegador, para garantir que nada se perca.</div></div>`:''}
  ${S.rascunhos.length?`<h2 class="sech">Em andamento</h2>${S.rascunhos.map(r=>{const b=banPorId(r.banheiroId);return `<div class="andam" data-act="continuar" data-id="${r.id}"><span class="item"><span class="di" style="--c:${r.tipo==='Reparo'?'var(--rep)':'var(--limp)'};margin:0">${ic(r.tipo==='Reparo'?'wrench':'broom')}</span></span><div class="f1"><b>${h(r.tipo||'Atividade')} · ${h(b?b.tag:'banheiro não escolhido')}</b><div class="tiny">${r.inicio?`Iniciada às ${h(r.inicio)}`:'Não iniciada'} · ${r.fotos.length} foto(s)</div></div>${r.inicio&&!r.fim?`<span class="crono" data-crono="${msDe(r.data,r.inicio)}">${fDur((Date.now()-msDe(r.data,r.inicio))/60000)}</span>`:''}${ic('right')}</div>`;}).join('')}`:''}
+ ${cardAlerta()}
  <h2 class="sech">O que você vai registrar?</h2>
  <div class="acts2"><button class="bigact l" data-act="novo" data-tipo="Limpeza"><span class="bi">${ic('broom')}</span><span><b>Limpeza</b><small>${nL} banheiro(s) aguardando</small></span></button>
  <button class="bigact r" data-act="novo" data-tipo="Reparo"><span class="bi">${ic('wrench')}</span><span><b>Reparo</b><small>${nR} com necessidade</small></span></button></div>
@@ -1005,7 +1023,7 @@ function vForm(){
   <div class="grid2 r"><div class="campo ${er('inicio')}"><label>Início <span class="req">*</span></label><div class="hora"><input type="time" data-k="inicio" value="${h(f.inicio)}"><button class="btn ${f.inicio?'sec':'vd'}" data-act="hora" data-k="inicio">${ic('play')} Agora</button></div></div>
   <div class="campo ${er('fim')}"><label>Término <span class="req">*</span></label><div class="hora"><input type="time" data-k="fim" value="${h(f.fim)}"><button class="btn ${f.inicio&&!f.fim?'':'sec'}" data-act="hora" data-k="fim">${ic('stop')} Agora</button></div></div></div>
   <div class="dur ${dur!=null&&(dur===0||dur>720)?'err':''}" id="durBox"><span class="muted">${ic('timer')} Duração total (calculada)</span><b id="durVal">${dur==null?(f.inicio?`<span data-crono="${msDe(f.data,f.inicio)}">${fDur((Date.now()-msDe(f.data,f.inicio))/60000)}</span>`:'—'):fDur(dur)}</b></div>
-  ${dur===0?`<div class="tiny" style="color:var(--err);margin-top:6px">O término precisa ser depois do início.</div>`:''}${dur!=null&&dur>720?`<div class="tiny" style="color:var(--err);margin-top:6px">Duração acima de 12 h — confira os horários.</div>`:''}
+  ${dur===0?`<div class="tiny" style="color:var(--err);margin-top:6px">O término precisa ser depois do início.</div>`:''}${dur!=null&&dur>720?`<div class="tiny" style="color:var(--err);margin-top:6px">${minDe(f.fim)<minDe(f.inicio)?'O término está antes do início. Confira os horários (só passa da meia-noite em atividades noturnas de até 12 h).':'Duração acima de 12 h — confira os horários.'}</div>`:''}
  </div></div>
  <div class="sec"><div class="sec-t">Execução</div><div class="sec-b">
   <div class="campo ${er('responsavel')}"><label>Responsável pela execução <span class="req">*</span></label><select data-k="matriculaResp"><option value="">Selecione…</option>${eq.map(p=>`<option value="${h(p.matricula)}" ${String(f.matriculaResp)===String(p.matricula)?'selected':''}>${h(p.nome)} – ${h(p.matricula)}</option>`).join('')}</select></div>
@@ -1039,14 +1057,13 @@ function onCampoForm(e){const t=e.target,f=S.form;if(!f||S.tela!=='form')return;
  if(S.erros&&S.erros.length&&e.type==='change'){S.erros=validar(f);}}
 function validar(f){const e=[];if(!f.banheiroId)e.push('banheiroId');['tipo','data','turno','frente','inicio','fim'].forEach(k=>{if(!String(f[k]||'').trim())e.push(k);});
  if(!f.matriculaResp||!f.responsavel)e.push('responsavel');if(!f.fotos.length)e.push('fotos');
- const d=duracao(f.inicio,f.fim);if(f.inicio&&f.fim&&!d)e.push('fim');if(f.data>hoje())e.push('data');
+ const d=duracao(f.inicio,f.fim);if(f.inicio&&f.fim&&(!d||d>720))e.push('fim');if(f.data>hoje())e.push('data');
  if(f.tipo==='Reparo'&&!f.situacao)e.push('situacao');return e;}
 async function salvarForm(){
  const f=S.form;f.observacoes=corrigirTexto(f.observacoes);if(f.descReparo)f.descReparo=corrigirTexto(f.descReparo);
  S.erros=validar(f);
  if(S.erros.length){render();const el=document.querySelector('.err-campo');if(el)el.scrollIntoView({behavior:'smooth',block:'center'});toast('Faltam campos obrigatórios','erro');return;}
  const b=banPorId(f.banheiroId),dur=duracao(f.inicio,f.fim);
- if(dur>720&&!await confirmar(`A duração ficou ${fDur(dur)}. Confirma os horários?`,'Confirmar'))return;
  const dados={tipo:f.tipo,tag:b.tag,banheiroId:b.id,data:f.data,turno:f.turno,frente:f.frente,inicio:f.inicio,fim:f.fim,duracaoMin:dur,responsavel:f.responsavel,matriculaResp:f.matriculaResp,
   observacoes:f.observacoes,itens:f.itens,situacao:f.tipo==='Reparo'?f.situacao:'',necessitaReparo:f.tipo==='Limpeza'&&f.necessitaReparo,descReparo:(f.tipo==='Reparo'||f.necessitaReparo)?f.descReparo:'',
   fotos:f.fotos.map(x=>({id:x.id,momento:x.momento})),_id:f.id};
@@ -1065,13 +1082,13 @@ function pedirFoto(momento,camera){const f=S.form;if(!f.banheiroId){toast('Escol
  inp.click();}
 
 /* ------------------------------ Fila de envio ------------------------------ */
-const NOMES_FILA={SENHA:'Troca de senha',BANHEIRO_DEL:'Exclusão de banheiro',REGISTRO:'Registro',SINALIZACAO:'Sinalização',BANHEIRO:'Cadastro de banheiro',FRENTE:'Frente de serviço',EQUIPE:'Equipe',EXCLUSAO:'Exclusão de registro',CONFIG:'Configuração'};
+const NOMES_FILA={APAGAR:'Apagar registros',SENHA:'Troca de senha',BANHEIRO_DEL:'Exclusão de banheiro',REGISTRO:'Registro',SINALIZACAO:'Sinalização',BANHEIRO:'Cadastro de banheiro',FRENTE:'Frente de serviço',EQUIPE:'Equipe',EXCLUSAO:'Exclusão de registro',CONFIG:'Configuração'};
 function vFila(){
  const L=[...S.fila].reverse(),pend=L.filter(r=>r.status==='pendente').length,rej=L.filter(r=>r.status==='rejeitado');
  return `<h1>Fila de envio</h1><p class="sub">Tudo o que foi feito neste aparelho. Os itens só saem daqui depois que o servidor confirma.</p>
  <div class="card syncbar ${pend||S.fotosPend?'pend':''}"><span class="ic">${ic(pend||S.fotosPend?'clock':'check')}</span><div class="f1"><b>${pend||S.fotosPend?`${pend} item(ns) e ${S.fotosPend} foto(s) aguardando envio`:'Tudo enviado'}</b><div class="tiny">Última sincronização: ${S.lastSync?fDT(S.lastSync)+' ('+tempo(S.lastSync)+')':'nunca'}${S.lastErr?` · Último erro: ${h(S.lastErr)}`:''}</div></div><button class="btn sm" data-act="sync">${ic('sync')} Sincronizar</button></div>
  ${rej.length?`<div class="aviso">${ic('alert')}<div>${rej.length} item(ns) recusado(s). Corrija e toque em <b>Reenviar</b>, ou remova.</div></div>`:''}
- ${L.length?L.slice(0,150).map(r=>{const d=r.dados||{};const desc=r.tipo==='REGISTRO'?`${d.tipo} · ${d.tag} · ${fData(d.data)} ${d.inicio}–${d.fim}`:(r.tipo==='BANHEIRO'||r.tipo==='BANHEIRO_DEL')?`TAG ${d.tag}`:r.tipo==='FRENTE'?d.nome:r.tipo==='EQUIPE'?`${(d.pessoas||[]).length} pessoa(s)`:r.tipo==='SINALIZACAO'?`${d.tipo} · ${d.tag}`:r.tipo==='EXCLUSAO'?`Registro ${d.numero||''}`:'';
+ ${L.length?L.slice(0,150).map(r=>{const d=r.dados||{};const desc=r.tipo==='REGISTRO'?`${d.tipo} · ${d.tag} · ${fData(d.data)} ${d.inicio}–${d.fim}`:(r.tipo==='BANHEIRO'||r.tipo==='BANHEIRO_DEL')?`TAG ${d.tag}`:r.tipo==='FRENTE'?d.nome:r.tipo==='EQUIPE'?`${(d.pessoas||[]).length} pessoa(s)`:r.tipo==='SINALIZACAO'?`${d.tipo} · ${d.tag}`:r.tipo==='EXCLUSAO'?`Registro ${d.numero||''}`:r.tipo==='APAGAR'?`${(d.ids||[]).length} registro(s)`:'';
   return `<div class="item" ${r.tipo==='REGISTRO'?`data-act="ver-reg" data-id="${r.id}"`:''} style="cursor:${r.tipo==='REGISTRO'?'pointer':'default'}"><div class="f1" style="min-width:0"><div class="t">${h(NOMES_FILA[r.tipo]||r.tipo)} <span class="tiny">${h(r.numero)}</span></div><div class="s">${h(desc)}</div><div class="s">${fDT(r.criadoEm)} · ${h(r.autor&&r.autor.nome)}</div>${r.erro?`<div class="alerta">${h(r.erro)}</div>`:''}</div>
   <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end"><span class="st ${r.status}">${{pendente:'Na fila',sincronizado:'Confirmado',rejeitado:'Recusado'}[r.status]}</span>${r.status==='rejeitado'?`<button class="btn sm" data-act="reenviar" data-id="${r.id}">Reenviar</button><button class="btn sm perigo" data-act="rm-fila" data-id="${r.id}">Remover</button>`:''}</div></div>`;}).join(''):`<div class="card vazio">${ic('check')}<div>Nada na fila deste aparelho.</div></div>`}
  <div class="row" style="margin-top:14px"><button class="btn sec f1" data-act="exportar">${ic('download')} Backup dos pendentes</button><button class="btn sec f1" data-act="importar">${ic('upload')} Importar backup</button></div>`;}
@@ -1149,7 +1166,7 @@ function vRegistro(){
   ${linha('Situação do reparo',h(r.situacao))}${r.necessitaReparo?linha('Necessidade de reparo identificada',h(r.descReparo||'Sim')):linha('Descrição do reparo',h(r.descReparo))}${linha('Observações',h(r.observacoes))}
   ${linha('Lançado em',fDT(r.lancadoEm)+' por '+h(r.lancadoPor||''))}</dl>
   ${!isAdm()&&r.st!=='sincronizado'?'':''}
-  <div class="row" style="margin-top:14px"><button class="btn sec" data-act="ver-ban" data-id="${h(r.banheiroId)}">${ic('toilet')} Histórico do banheiro</button>${isAdm()&&r.status!=='EXCLUÍDO'&&r.st==='sincronizado'?`<button class="btn perigo" data-act="excluir-reg" data-id="${r.id}">${ic('trash')} Excluir registro</button>`:''}${fila&&fila.status==='rejeitado'?`<button class="btn" data-act="reenviar" data-id="${r.id}">Reenviar</button>`:''}</div></div>
+  <div class="row" style="margin-top:14px"><button class="btn sec" data-act="ver-ban" data-id="${h(r.banheiroId)}">${ic('toilet')} Histórico do banheiro</button>${isAdm()&&r.status!=='EXCLUÍDO'&&r.st==='sincronizado'?`<button class="btn perigo" data-act="excluir-reg" data-id="${r.id}">${ic('trash')} Excluir registro</button>`:''}${isAdm()&&r.status==='EXCLUÍDO'&&r.st==='sincronizado'?`<button class="btn perigo" data-act="apagar-reg" data-id="${r.id}">${ic('trash')} Apagar definitivamente</button>`:''}${fila&&fila.status==='rejeitado'?`<button class="btn" data-act="reenviar" data-id="${r.id}">Reenviar</button>`:''}</div></div>
  <div class="card"><h2>Fotos (${fts.length||r.qtdFotos})</h2>${['Antes','Depois'].map(m=>{const a=fts.filter(x=>x.momento===m);return a.length?`<div class="lbl" style="margin-top:6px">${m}</div><div class="galeria" style="margin-bottom:10px">${a.map(x=>`<figure data-act="ver-foto" data-id="${x.id}"><img data-thumb="${x.id}" alt=""><figcaption>${m}</figcaption></figure>`).join('')}</div>`:'';}).join('')||`<p class="muted">${r.qtdFotos?'Fotos ainda não baixadas — abra com internet.':'Sem fotos.'}</p>`}</div>`;}
 /* miniaturas: aparelho → cache → servidor */
 async function preencherThumbs(){const els=[...document.querySelectorAll('img[data-thumb]')].filter(e=>!e.getAttribute('src'));if(!els.length)return;
@@ -1165,6 +1182,60 @@ async function verFoto(id){const v=document.createElement('div');v.className='vi
 async function excluirRegistro(id){const r=registros().find(x=>x.id===id);if(!r)return;
  const motivo=await perguntar(`Excluir ${r.tipo.toLowerCase()} ${r.numero||''}`,'Motivo da exclusão (fica registrado — o registro não é apagado da planilha)',true);if(!motivo)return;
  await enfileirar('EXCLUSAO',{ref:r.id,numero:r.numero,tag:r.tag,motivo},'EXC');toast('Exclusão registrada','ok');render();}
+
+/* Apagar definitivamente: só registros já EXCLUÍDOS. Somem do app, dos relatórios e do painel; as fotos vão para a lixeira do Drive.
+   Na planilha a linha fica marcada como APAGADO (rastro de auditoria). */
+async function apagarRegistros(ids){
+ const conf=new Set(S.srvRegs.filter(x=>x.status==='EXCLUÍDO').map(x=>x.id)),prontos=ids.filter(i=>conf.has(i)),esperando=ids.length-prontos.length;
+ if(!prontos.length){toast(online()?'A exclusão ainda está sendo enviada. Toque em Sincronizar e tente de novo.':'Sem internet: a exclusão ainda não chegou ao servidor. Tente quando houver sinal.','erro');return;}
+ if(esperando)toast(`${esperando} exclusão(ões) ainda não chegaram ao servidor e ficam para depois.`);
+ ids=prontos;
+ if(!await confirmar(`Apagar definitivamente ${ids.length} registro(s) excluído(s)? Eles somem do app e dos relatórios, e as fotos vão para a lixeira do Drive. Não dá para desfazer.`,'Apagar'))return;
+ for(let i=0;i<ids.length;i+=200)await enfileirar('APAGAR',{ids:ids.slice(i,i+200)},'APG');
+ toast(`${ids.length} registro(s) apagado(s)`,'ok');if(S.tela==='registro')ir('historico');else render();}
+
+/* ------------------------------ Alerta de limpeza vencida ------------------------------
+   Calculado no próprio aparelho (funciona sem internet): frequência do banheiro (padrão 24 h)
+   contada a partir da última limpeza registrada, ou da data de disponibilização. */
+function listaVencidos(){const st=statusTodos();return banheiros().filter(b=>b.ativo).map(b=>({b,s:st.get(b.id)})).filter(x=>x.s&&x.s.k==='limp')
+ .sort((x,y)=>(y.s.atrasoH==null?1e9:y.s.atrasoH)-(x.s.atrasoH==null?1e9:x.s.atrasoH));}
+function listaProximos(horas=2){const st=statusTodos(),ag=Date.now();return banheiros().filter(b=>b.ativo).map(b=>({b,s:st.get(b.id)})).filter(x=>x.s&&x.s.k==='ok'&&x.s.venceEm&&x.s.venceEm-ag<horas*3600e3).sort((x,y)=>x.s.venceEm-y.s.venceEm);}
+function atrasoTxt(s){if(s.atrasoH!=null&&s.atrasoH>0){const h=s.atrasoH;return h<1?`venceu há ${Math.max(1,Math.round(h*60))} min`:h<48?`venceu há ${fN(h)} h`:`venceu há ${fN(h/24)} dias`;}
+ if(/Sinalizado/.test(s.motivo||''))return 'sinalizado';return s.ultLimp?'vencida':'sem limpeza registrada';}
+const localTxt=b=>[b.localizacao,b.descricao].filter(Boolean).join(' · ')||'Local não informado no cadastro';
+function itemVencido(x,mini){const b=x.b,s=x.s,grave=s.atrasoH!=null&&s.atrasoH>=s.freq;
+ return `<div class="venc ${grave?'grave':''}"><div class="vt"><span class="tagb">${h(b.tag)}</span><span class="vb">${h(atrasoTxt(s))}</span></div>
+  <div class="vl">${ic('pin')}<div><b>${h(localTxt(b))}</b><small>${h(b.frente||'Sem frente definida')}</small></div></div>
+  ${mini?'':`<div class="tiny">Última limpeza: ${s.ultLimp?fDT(s.ultLimp)+' ('+tempo(s.ultLimp)+')':'nenhuma registrada'} · frequência ${s.freq} h${/Sinalizado/.test(s.motivo||'')?' · '+h(s.motivo):''}</div>`}
+  <div class="row" style="margin-top:8px"><button class="btn vd sm f1" data-act="novo" data-tipo="Limpeza" data-ban="${b.id}">${ic('broom')} Limpar agora</button>${mini?'':`<button class="btn sec sm" data-act="ver-ban" data-id="${b.id}">${ic('clock')} Histórico</button>`}</div></div>`;}
+function cardAlerta(){const L=listaVencidos();if(!L.length)return '';
+ return `<div class="alerta-limp"><div class="al-top">${ic('alert')}<div class="f1"><b>${L.length} banheiro(s) com limpeza vencida</b><small>Toque em “Limpar agora” para registrar</small></div><button class="btn sm" data-act="nav" data-to="vencidos">Ver todos</button></div>
+ ${L.slice(0,3).map(x=>itemVencido(x,true)).join('')}${L.length>3?`<button class="btn ghost bl" data-act="nav" data-to="vencidos">+ ${L.length-3} banheiro(s) — ver lista completa ${ic('right')}</button>`:''}</div>`;}
+function vVencidos(){
+ const T=listaVencidos(),P=listaProximos(),fr=S.vFrente||'';
+ const L=T.filter(x=>!fr||(x.b.frente||'Sem frente definida')===fr),frs=[...new Set(T.map(x=>x.b.frente||'Sem frente definida'))].sort();
+ const grupos={};L.forEach(x=>{const k=x.b.frente||'Sem frente definida';(grupos[k]=grupos[k]||[]).push(x);});
+ const podeNotif='Notification' in window&&Notification.permission==='default';
+ return `<h1>Limpezas vencidas</h1><p class="sub">Banheiros que passaram da frequência de limpeza${S.lastSync?'':' (calculado com os dados deste aparelho)'}. Funciona mesmo sem internet.</p>
+ ${podeNotif?`<div class="info" style="display:flex;gap:10px;align-items:center;margin-bottom:12px">${ic('alert')}<div class="f1">Receba um aviso no celular quando um banheiro vencer.</div><button class="btn sm" data-act="ativar-alerta">Ativar aviso</button></div>`:''}
+ <div class="kpis" style="margin-bottom:12px">${kpi('alert','Vencidos agora',fN(T.length),'precisam de limpeza','#c93434',T.length?'#c93434':'#1f8f3a')}${kpi('clock','Vencem em até 2 h',fN(P.length),'programe a próxima rota','#d99100')}</div>
+ ${frs.length>1?`<div class="stchips"><button class="${!fr?'at':''}" data-act="vfr" data-k="">Todas <em>${T.length}</em></button>${frs.map(f=>`<button class="${fr===f?'at':''}" data-act="vfr" data-k="${h(f)}">${h(f)} <em>${T.filter(x=>(x.b.frente||'Sem frente definida')===f).length}</em></button>`).join('')}</div>`:''}
+ ${L.length?Object.keys(grupos).sort().map(g=>`<h2 class="sech">${ic('map')} ${h(g)} <span class="tiny">(${grupos[g].length})</span></h2><div class="vgrid">${grupos[g].map(x=>itemVencido(x)).join('')}</div>`).join('')
+  :`<div class="card vazio">${ic('check')}<div><b>Nenhuma limpeza vencida.</b></div><p class="muted">Todos os banheiros ativos estão dentro da frequência.</p></div>`}
+ ${P.length?`<h2 class="sech">${ic('clock')} Vencem nas próximas 2 horas</h2><div class="card p0"><div class="tbw"><table class="tb"><tr><th>TAG</th><th>Local</th><th>Frente</th><th>Vence às</th></tr>${P.slice(0,40).map(x=>`<tr class="cl" data-act="ver-ban" data-id="${x.b.id}"><td><span class="tagb">${h(x.b.tag)}</span></td><td>${h(localTxt(x.b))}</td><td>${h(x.b.frente||'—')}</td><td>${fDT(x.s.venceEm)}</td></tr>`).join('')}</table></div></div>`:''}`;}
+/* aviso no celular (enquanto o app estiver aberto ou em segundo plano) */
+async function verificarAlertas(){
+ try{if(!S.user||!('Notification' in window)||Notification.permission!=='granted')return;
+  const L=listaVencidos(),ids=L.map(x=>x.b.id);let ja=[];try{ja=JSON.parse(localStorage.getItem('fagbq_alertados')||'[]');}catch(e){}
+  const novos=L.filter(x=>!ja.includes(x.b.id));localStorage.setItem('fagbq_alertados',JSON.stringify(ids));
+  if(!novos.length)return;
+  const corpo=novos.slice(0,4).map(x=>`${x.b.tag} — ${localTxt(x.b)}${x.b.frente?' ('+x.b.frente+')':''}`).join('\n')+(novos.length>4?`\n+ ${novos.length-4} outro(s)`:'');
+  const tit=novos.length===1?`Limpeza vencida: ${novos[0].b.tag}`:`${novos.length} banheiros precisam de limpeza`;
+  const reg=navigator.serviceWorker&&await navigator.serviceWorker.getRegistration();
+  if(reg&&reg.showNotification)reg.showNotification(tit,{body:corpo,icon:'icon-192.png',badge:'icon-192.png',tag:'vencidos',renotify:true,data:{tela:'vencidos'}});
+  else new Notification(tit,{body:corpo,icon:'icon-192.png',tag:'vencidos'});
+ }catch(e){}}
+async function ativarAlerta(){try{const p=await Notification.requestPermission();if(p==='granted'){localStorage.removeItem('fagbq_alertados');toast('Aviso ativado neste aparelho','ok');verificarAlertas();}else toast('Permissão negada. Ative as notificações do app nas configurações do celular.','erro');}catch(e){toast('Este aparelho não permite avisos.','erro');}render();}
 
 /* ------------------------------ Cadastro de banheiros ------------------------------ */
 function vBanheiros(){
@@ -1261,7 +1332,7 @@ async function eqLote(){const ps=[];for(const l of $('#eqLote').value.split(/\r?
 
 /* ------------------------------ Configurações ------------------------------ */
 function vMais(){return `<h1>Mais opções</h1><p class="sub">Cadastros e administração</p>
- ${[['banheiros','Cadastro de banheiros','TAGs, frentes, ativar/inativar e etiquetas QR','toilet'],['frentes','Frentes de serviço','Frentes usadas no registro','map'],['equipe','Equipe','Pessoas e perfis de acesso','users'],['fila','Fila de envio','O que está guardado neste aparelho','clock'],['config','Configurações','Servidor, frequência de limpeza, turnos e aparelhos','gear']].map(([k,t,d,i])=>`<button class="doc" style="--c:var(--az);width:100%;margin-bottom:10px" data-act="nav" data-to="${k}"><span class="di">${ic(i)}</span><span class="f1"><b>${t}</b><small>${d}</small></span><span class="seta">${ic('right')}</span></button>`).join('')}`;}
+ ${[['vencidos','Limpezas vencidas','Banheiros que passaram da frequência, com o local','alert'],['banheiros','Cadastro de banheiros','TAGs, frentes, ativar/inativar e etiquetas QR','toilet'],['frentes','Frentes de serviço','Frentes usadas no registro','map'],['equipe','Equipe','Pessoas e perfis de acesso','users'],['fila','Fila de envio','O que está guardado neste aparelho','clock'],['config','Configurações','Servidor, frequência de limpeza, turnos e aparelhos','gear']].map(([k,t,d,i])=>`<button class="doc" style="--c:var(--az);width:100%;margin-bottom:10px" data-act="nav" data-to="${k}"><span class="di">${ic(i)}</span><span class="f1"><b>${t}</b><small>${d}</small></span><span class="seta">${ic('right')}</span></button>`).join('')}`;}
 function vConfig(){
  const base=location.href.split(/[?#]/)[0],link=S.cfg.apiUrl?`${base}?s=${encodeURIComponent(S.cfg.apiUrl)}${S.cfg.key?`&k=${encodeURIComponent(S.cfg.key)}`:''}`:'';const c=cfgOp();
  return `<div class="grid-p"><div class="card c6"><h2>Operação</h2>
@@ -1489,13 +1560,13 @@ function vPainel(){
 
 /* ------------------------------ Histórico e relatórios ------------------------------ */
 function hFiltrados(){const tag=normTag(S.hTag),q=S.hBusca.toLowerCase(),ini=S.hIni||addDias(hoje(),-29),fimD=S.hFim||hoje();
- return registros().filter(r=>(isAdm()||r.status!=='EXCLUÍDO')&&r.data>=ini&&r.data<=fimD&&(!S.hTurno||r.turno===S.hTurno)&&(!S.hFrente||r.frente===S.hFrente)&&(!tag||r.tag===tag)&&(S.hTipo==='EXCLUÍDO'?r.status==='EXCLUÍDO':(!S.hTipo||r.tipo===S.hTipo))&&(!S.hResp||String(r.matriculaResp)===S.hResp)
+ return registros().filter(r=>(S.hTipo==='EXCLUÍDO'||r.status!=='EXCLUÍDO')&&r.data>=ini&&r.data<=fimD&&(!S.hTurno||r.turno===S.hTurno)&&(!S.hFrente||r.frente===S.hFrente)&&(!tag||r.tag===tag)&&(S.hTipo==='EXCLUÍDO'?r.status==='EXCLUÍDO':(!S.hTipo||r.tipo===S.hTipo))&&(!S.hResp||String(r.matriculaResp)===S.hResp)
   &&(!q||[r.observacoes,r.responsavel,r.numero,r.descReparo].join(' ').toLowerCase().includes(q)));}
 function vHistorico(){
  const L=hFiltrados(),at=L.filter(r=>r.status!=='EXCLUÍDO'),lim=at.filter(r=>r.tipo==='Limpeza'),rep=at.filter(r=>r.tipo==='Reparo');
  const ini=S.hIni||addDias(hoje(),-29),fimD=S.hFim||hoje();
  return `<div class="row" style="justify-content:space-between;margin-bottom:10px"><div><h1>Histórico e relatórios</h1><p class="sub" style="margin:0">Todos os serviços executados${isAdm()?'':' (consulta)'}</p></div>
-  <div class="row"><button class="btn sec" data-act="exp-xlsx">${ic('sheet')} Excel</button><button class="btn sec" data-act="exp-pdf">${ic('pdf')} PDF</button></div></div>
+  <div class="row">${isAdm()?(()=>{const n=registros().filter(r=>r.status==='EXCLUÍDO').length;return S.hTipo==='EXCLUÍDO'?(n?`<button class="btn perigo" data-act="apagar-excluidos">${ic('trash')} Apagar definitivamente (${n})</button>`:''):(n?`<button class="btn ghost sm" data-act="ver-excluidos">${n} excluído(s)</button>`:'');})():''}<button class="btn sec" data-act="exp-xlsx">${ic('sheet')} Excel</button><button class="btn sec" data-act="exp-pdf">${ic('pdf')} PDF</button></div></div>
  <div class="filtros"><div class="fgrid">
   <div><label>De</label><input type="date" data-h="hIni" value="${ini}" max="${fimD}"></div><div><label>Até</label><input type="date" data-h="hFim" value="${fimD}" min="${ini}"></div>
   <div><label>TAG do banheiro</label><input list="dlTagsH" data-h="hTag" value="${h(S.hTag)}" placeholder="Todas">${dl('dlTagsH',banheiros().map(b=>b.tag))}</div>
@@ -1608,9 +1679,14 @@ const ACOES={
  'ver-foto':el=>verFoto(el.dataset.id),
  'sinalizar':el=>sinalizar(el.dataset.id),
  'excluir-reg':el=>excluirRegistro(el.dataset.id),
+ 'apagar-reg':el=>apagarRegistros([el.dataset.id]),
+ 'apagar-excluidos':()=>apagarRegistros(hFiltrados().filter(r=>r.status==='EXCLUÍDO'&&r.st==='sincronizado').map(r=>r.id)),
+ 'ver-excluidos':()=>{S.hTipo='EXCLUÍDO';S.hLim=100;render();},
  'reenviar':async el=>{const r=S.fila.find(x=>x.id===el.dataset.id);if(!r)return;r.status='pendente';r.erro='';r.auth=S.auth;await grava('fila',r);await recarregarFila();invalidar();render();sincronizar(true);},
  'rm-fila':async el=>{const r=S.fila.find(x=>x.id===el.dataset.id);if(!r)return;if(!await confirmar('Remover este item recusado do aparelho? Ele não será enviado.','Remover'))return;
   if(r.tipo==='REGISTRO'&&r.dados.fotos)await apaga('fotos',r.dados.fotos.map(f=>f.id));await apaga('fila',r.id);await recarregarFila();await recarregarFotosPend();invalidar();render();},
+ 'vfr':el=>{S.vFrente=el.dataset.k;render();},
+ 'ativar-alerta':()=>ativarAlerta(),
  'gran':el=>{S.gran=el.dataset.g;render();},
  'limpar-filtros':()=>{S.fTurno=S.fFrente=S.fTag=S.fTipo='';render();},
  'h-mais':()=>{S.hLim+=200;render();},
@@ -1693,9 +1769,10 @@ async function init(){
  }catch(e){root.innerHTML=`<div class="aviso" style="margin:20px">Erro ao abrir o armazenamento do aparelho: ${h(e.message)}. Não use aba anônima.</div>`;return;}
  try{if(navigator.storage&&navigator.storage.persist){S.persist=await navigator.storage.persisted();if(!S.persist)S.persist=await navigator.storage.persist();}}catch(e){}
  if('serviceWorker' in navigator&&location.protocol.startsWith('http')&&!window.DEMO_API)navigator.serviceWorker.register('sw.js').catch(()=>{});
- S.tela=isAdm()?'painel':'lancar';
+ S.tela=location.hash==='#vencidos'?'vencidos':(isAdm()?'painel':'lancar');
  render();
  setInterval(()=>{if(S.user)sincronizar();},90000);
+ setInterval(()=>{verificarAlertas();if(S.user&&S.tela==='vencidos'&&!document.querySelector('.modal'))redesenharSePuder();},60000);setTimeout(verificarAlertas,4000);
  if(S.user)sincronizar();else if(temServidor()&&!S.equipeSrv.length)sincronizar();
 }
 init();
