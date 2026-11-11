@@ -1,5 +1,5 @@
 /* Service worker – mantém o app funcionando sem internet */
-const CACHE = 'fag-banheiros-v1.0.0';
+const CACHE = 'fag-banheiros-v1.3.0';
 const ARQUIVOS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './logo-branco.png', './logo-azul.png', './simbolo-branco.png', './simbolo-azul.png', './login.jpg',
   './lib/xlsx.min.js', './lib/jspdf.min.js', './lib/autotable.min.js', './lib/qrcode.min.js'];
 self.addEventListener('install', e => {
@@ -13,13 +13,14 @@ self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET' || u.origin !== location.origin) return; // servidor (Apps Script) nunca passa pelo cache
   const pagina = e.request.mode === 'navigate' || u.pathname.endsWith('/') || u.pathname.endsWith('.html');
   if (pagina) {
-    // Página do app: com internet busca sempre a versão mais nova; sem internet usa a cópia guardada.
-    e.respondWith(
-      fetch(e.request, { cache: 'no-store' }).then(r => {
-        if (r && r.ok) { const cl = r.clone(); caches.open(CACHE).then(c => c.put('./index.html', cl)); }
-        return r;
-      }).catch(() => caches.match('./index.html').then(c => c || caches.match('./')))
-    );
+    // Página do app: abre NA HORA com a cópia guardada; a versão nova é baixada em segundo plano
+    // e entra na próxima vez que o app for aberto. Sem cópia guardada, busca na rede.
+    e.respondWith(caches.open(CACHE).then(async c => {
+      const guardada = await c.match('./index.html');
+      const rede = fetch(e.request, { cache: 'no-store' }).then(r => { if (r && r.ok) c.put('./index.html', r.clone()); return r; });
+      if (guardada) { e.waitUntil(rede.catch(() => {})); return guardada; }
+      return rede.catch(() => caches.match('./'));
+    }));
     return;
   }
   // Imagens e bibliotecas: usa a cópia guardada e atualiza em segundo plano.
