@@ -1,5 +1,5 @@
 /* Service worker – mantém o app funcionando sem internet */
-const CACHE = 'fag-banheiros-v1.4.0';
+const CACHE = 'fag-banheiros-v1.5.0';
 const ARQUIVOS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './logo-branco.png', './logo-azul.png', './simbolo-branco.png', './simbolo-azul.png', './login.jpg',
   './lib/xlsx.min.js', './modelo_banheiros.xlsx', './modelo_frentes.xlsx', './modelo_equipe.xlsx', './lib/jspdf.min.js', './lib/autotable.min.js', './lib/qrcode.min.js'];
 self.addEventListener('install', e => {

@@ -531,7 +531,7 @@ main.com-barra{padding-bottom:calc(96px + env(safe-area-inset-bottom))!important
    Perfis: LANÇADOR (lança, consulta status e histórico) e
            ADMINISTRADOR (vê tudo: painel, cadastros, relatórios).
    ===================================================================== */
-const APP_VERSION='1.4.0';
+const APP_VERSION='1.5.0';
 const TURNOS=['Diurno','Noturno'];
 const TURNOS_EQ=['Diurno','Noturno','ADM'];
 const PERFIS=['LANÇADOR','ADMINISTRADOR'];
@@ -634,7 +634,16 @@ function modal(html,onClick){const m=document.createElement('div');m.className='
  m.addEventListener('click',e=>{if(e.target===m){m.remove();if(m._fechar)m._fechar();return;}const b=e.target.closest('[data-m]');if(b){e.stopPropagation();onClick&&onClick(b.dataset.m,m,b);}});return m;}
 function confirmar(msg,sim='Sim'){return new Promise(res=>modal(`<p style="margin:0 0 16px">${h(msg)}</p><div class="row"><button class="btn sec f1" data-m="0">Não</button><button class="btn f1" data-m="1">${h(sim)}</button></div>`,(v,m)=>{m.remove();res(v==='1');}));}
 function perguntar(tit,label,obrig){return new Promise(res=>{const m=modal(`<h2>${h(tit)}</h2><div class="campo"><label>${h(label)}</label><textarea id="pgTxt" spellcheck="true" lang="pt-BR"></textarea></div><div class="row"><button class="btn sec f1" data-m="0">Cancelar</button><button class="btn f1" data-m="1">Confirmar</button></div>`,(v,m)=>{const t=$('#pgTxt',m).value.trim();if(v==='1'&&obrig&&!t){toast('Preencha o campo','erro');return;}m.remove();res(v==='1'?t:null);});m._fechar=()=>res(null);setTimeout(()=>$('#pgTxt',m).focus(),50);});}
-function carregarScript(src){return new Promise((res,rej)=>{if(document.querySelector(`script[data-lib="${src}"]`))return res();const s=document.createElement('script');s.src=src;s.dataset.lib=src;s.onload=()=>res();s.onerror=()=>rej(new Error('Não consegui carregar '+src+' (abra o app uma vez com internet)'));document.head.appendChild(s);});}
+const LIBS={'lib/xlsx.min.js':['XLSX','https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.mini.min.js'],'lib/jspdf.min.js':['jspdf','https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'],
+ 'lib/autotable.min.js':[null,'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js'],'lib/qrcode.min.js':['qrcode','https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js']};
+const _libOk={};
+function _tag(url){return new Promise((res,rej)=>{const s=document.createElement('script');s.src=url;s.onload=()=>res(s);s.onerror=()=>{s.remove();rej(new Error('falhou '+url));};document.head.appendChild(s);});}
+async function carregarScript(src){const [glob,cdn]=LIBS[src]||[null,null];
+ if(_libOk[src]&&(!glob||window[glob]))return;
+ if(glob&&window[glob]){_libOk[src]=true;return;}
+ try{await _tag(src+'?v='+APP_VERSION);if(!glob||window[glob]){_libOk[src]=true;return;}}catch(e){}
+ if(cdn){try{await _tag(cdn);if(!glob||window[glob]){_libOk[src]=true;return;}}catch(e){}}
+ throw new Error('Não consegui carregar o componente '+src.replace('lib/','')+'. Confira se a pasta "lib" foi enviada ao GitHub e abra o app com internet.');}
 
 /* ------------------------------ Armazenamento no aparelho ------------------------------ */
 let _db;
@@ -685,7 +694,7 @@ function turnoDe(hora){const c=cfgOp(),m=minDe(hora||agora()),a=minDe(c.diurnoIn
 const _memo={};function memo(k,fn){const v=S._ver||0,c=_memo[k];if(c&&c.v===v)return c.r;const r=fn();_memo[k]={v,r};return r;}
 function mesclar(lista,tipo,chave='id'){const m=new Map(lista.map(x=>[String(x[chave]),x]));
  S.fila.filter(r=>r.tipo===tipo&&r.status!=='sincronizado').forEach(r=>{const d=r.dados;m.set(String(d[chave]),{...m.get(String(d[chave])),...d,_pend:r.status});});return [...m.values()];}
-function banheiros(){return memo('ban',()=>mesclar(S.banheirosSrv.map(b=>({...b,ativo:sim(b.ativo),frequenciaH:b.frequenciaH?+b.frequenciaH:'' ,tag:normTag(b.tag)})),'BANHEIRO').sort((a,b)=>a.tag.localeCompare(b.tag,'pt-BR',{numeric:true})));}
+function banheiros(){return memo('ban',()=>{const del=new Set(S.fila.filter(r=>r.tipo==='BANHEIRO_DEL'&&r.status==='pendente').map(r=>r.dados.id));return mesclar(S.banheirosSrv.map(b=>({...b,ativo:sim(b.ativo),frequenciaH:b.frequenciaH?+b.frequenciaH:'' ,tag:normTag(b.tag)})),'BANHEIRO').filter(b=>!del.has(b.id)).sort((a,b)=>a.tag.localeCompare(b.tag,'pt-BR',{numeric:true}));});}
 function frentes(){return memo('fre',()=>mesclar(S.frentesSrv.map(f=>({...f,ativa:sim(f.ativa)})),'FRENTE').sort((a,b)=>String(a.nome).localeCompare(b.nome)));}
 const frentesAtivas=()=>memo('freA',()=>frentes().filter(f=>f.ativa));
 function equipe(){return memo('eq',equipe0);}
@@ -1056,13 +1065,13 @@ function pedirFoto(momento,camera){const f=S.form;if(!f.banheiroId){toast('Escol
  inp.click();}
 
 /* ------------------------------ Fila de envio ------------------------------ */
-const NOMES_FILA={SENHA:'Troca de senha',REGISTRO:'Registro',SINALIZACAO:'Sinalização',BANHEIRO:'Cadastro de banheiro',FRENTE:'Frente de serviço',EQUIPE:'Equipe',EXCLUSAO:'Exclusão de registro',CONFIG:'Configuração'};
+const NOMES_FILA={SENHA:'Troca de senha',BANHEIRO_DEL:'Exclusão de banheiro',REGISTRO:'Registro',SINALIZACAO:'Sinalização',BANHEIRO:'Cadastro de banheiro',FRENTE:'Frente de serviço',EQUIPE:'Equipe',EXCLUSAO:'Exclusão de registro',CONFIG:'Configuração'};
 function vFila(){
  const L=[...S.fila].reverse(),pend=L.filter(r=>r.status==='pendente').length,rej=L.filter(r=>r.status==='rejeitado');
  return `<h1>Fila de envio</h1><p class="sub">Tudo o que foi feito neste aparelho. Os itens só saem daqui depois que o servidor confirma.</p>
  <div class="card syncbar ${pend||S.fotosPend?'pend':''}"><span class="ic">${ic(pend||S.fotosPend?'clock':'check')}</span><div class="f1"><b>${pend||S.fotosPend?`${pend} item(ns) e ${S.fotosPend} foto(s) aguardando envio`:'Tudo enviado'}</b><div class="tiny">Última sincronização: ${S.lastSync?fDT(S.lastSync)+' ('+tempo(S.lastSync)+')':'nunca'}${S.lastErr?` · Último erro: ${h(S.lastErr)}`:''}</div></div><button class="btn sm" data-act="sync">${ic('sync')} Sincronizar</button></div>
  ${rej.length?`<div class="aviso">${ic('alert')}<div>${rej.length} item(ns) recusado(s). Corrija e toque em <b>Reenviar</b>, ou remova.</div></div>`:''}
- ${L.length?L.slice(0,150).map(r=>{const d=r.dados||{};const desc=r.tipo==='REGISTRO'?`${d.tipo} · ${d.tag} · ${fData(d.data)} ${d.inicio}–${d.fim}`:r.tipo==='BANHEIRO'?`TAG ${d.tag}`:r.tipo==='FRENTE'?d.nome:r.tipo==='EQUIPE'?`${(d.pessoas||[]).length} pessoa(s)`:r.tipo==='SINALIZACAO'?`${d.tipo} · ${d.tag}`:r.tipo==='EXCLUSAO'?`Registro ${d.numero||''}`:'';
+ ${L.length?L.slice(0,150).map(r=>{const d=r.dados||{};const desc=r.tipo==='REGISTRO'?`${d.tipo} · ${d.tag} · ${fData(d.data)} ${d.inicio}–${d.fim}`:(r.tipo==='BANHEIRO'||r.tipo==='BANHEIRO_DEL')?`TAG ${d.tag}`:r.tipo==='FRENTE'?d.nome:r.tipo==='EQUIPE'?`${(d.pessoas||[]).length} pessoa(s)`:r.tipo==='SINALIZACAO'?`${d.tipo} · ${d.tag}`:r.tipo==='EXCLUSAO'?`Registro ${d.numero||''}`:'';
   return `<div class="item" ${r.tipo==='REGISTRO'?`data-act="ver-reg" data-id="${r.id}"`:''} style="cursor:${r.tipo==='REGISTRO'?'pointer':'default'}"><div class="f1" style="min-width:0"><div class="t">${h(NOMES_FILA[r.tipo]||r.tipo)} <span class="tiny">${h(r.numero)}</span></div><div class="s">${h(desc)}</div><div class="s">${fDT(r.criadoEm)} · ${h(r.autor&&r.autor.nome)}</div>${r.erro?`<div class="alerta">${h(r.erro)}</div>`:''}</div>
   <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end"><span class="st ${r.status}">${{pendente:'Na fila',sincronizado:'Confirmado',rejeitado:'Recusado'}[r.status]}</span>${r.status==='rejeitado'?`<button class="btn sm" data-act="reenviar" data-id="${r.id}">Reenviar</button><button class="btn sm perigo" data-act="rm-fila" data-id="${r.id}">Remover</button>`:''}</div></div>`;}).join(''):`<div class="card vazio">${ic('check')}<div>Nada na fila deste aparelho.</div></div>`}
  <div class="row" style="margin-top:14px"><button class="btn sec f1" data-act="exportar">${ic('download')} Backup dos pendentes</button><button class="btn sec f1" data-act="importar">${ic('upload')} Importar backup</button></div>`;}
@@ -1177,12 +1186,11 @@ function vBanheiros(){
  <div class="filtros" style="margin-top:14px"><div class="inp-ic f1" style="min-width:180px">${ic('search')}<input id="banBusca" placeholder="Pesquisar por TAG…" value="${h(S.banBusca)}"></div>
   <select class="mini" data-f="banFrente"><option value="">Todas as frentes</option><option value="__sem" ${S.banFrente==='__sem'?'selected':''}>Sem frente (${todosB.filter(b=>!b.frente).length})</option>${frentes().map(f=>`<option ${S.banFrente===f.nome?'selected':''}>${h(f.nome)}</option>`).join('')}</select>
   <select class="mini" data-f="banAtivo"><option value="">Ativos e inativos</option><option value="1" ${S.banAtivo==='1'?'selected':''}>Somente ativos</option><option value="0" ${S.banAtivo==='0'?'selected':''}>Somente inativos</option></select></div>
- ${S.banSel.size?`<div class="card selbar"><b>${S.banSel.size} selecionado(s)</b><select id="selFrente" class="mini"><option value="">Escolha a frente…</option>${frentesAtivas().map(f=>`<option>${h(f.nome)}</option>`).join('')}</select><button class="btn sm" data-act="ban-sel-frente">${ic('map')} Definir frente</button><button class="btn sec sm" data-act="ban-sel-limpar">Limpar seleção</button></div>`:''}
+ ${S.banSel.size?`<div class="card selbar"><b>${S.banSel.size} selecionado(s)</b><select id="selFrente" class="mini"><option value="">Escolha a frente…</option>${frentesAtivas().map(f=>`<option>${h(f.nome)}</option>`).join('')}</select><button class="btn sm" data-act="ban-sel-frente">${ic('map')} Definir frente</button><button class="btn perigo sm" data-act="ban-sel-excluir">${ic('trash')} Excluir selecionados</button><button class="btn sec sm" data-act="ban-sel-limpar">Limpar seleção</button></div>`:''}
  <div class="card p0"><div class="tbw"><table class="tb"><tr><th style="width:34px"><input type="checkbox" class="ck" data-act="ban-sel-todos" ${L.length&&L.every(b=>S.banSel.has(b.id))?'checked':''} title="Selecionar todos do filtro"></th><th>TAG</th><th>Descrição</th><th>Frente</th><th>Localização</th><th>Disponibilizado</th><th>Situação</th><th class="n">Limpezas</th><th class="n">Reparos</th><th></th></tr>
   ${L.map(b=>{const s=st.get(b.id)||{k:'ok'};return `<tr><td><input type="checkbox" class="ck" data-act="ban-sel" data-id="${b.id}" ${S.banSel.has(b.id)?'checked':''}></td><td class="cl" data-act="ver-ban" data-id="${b.id}" style="cursor:pointer"><span class="tagb">${h(b.tag)}</span>${b._pend?` <span class="st ${b._pend==='rejeitado'?'rejeitado':'pendente'}">${b._pend==='rejeitado'?'Recusado':'Na fila'}</span>`:''}</td><td>${h(b.descricao||'')}</td><td>${b.frente?h(b.frente):'<span class="st pendente">Sem frente</span>'}</td><td>${h(b.localizacao||'')}</td><td>${fData(b.dataDisponibilizacao)}</td><td>${stBadge(s.k)}</td><td class="n">${s.nLimp||0}</td><td class="n">${s.nRep||0}</td>
-  <td class="tbl-ac"><button class="btn ghost sm" data-act="editar-ban" data-id="${b.id}" title="Editar">${ic('edit')}</button><button class="btn ghost sm" data-act="ban-ativo" data-id="${b.id}" title="${b.ativo?'Inativar':'Ativar'}" style="color:${b.ativo?'var(--err)':'var(--ok)'}">${ic('power')}</button></td></tr>`;}).join('')||`<tr><td colspan="10" class="muted" style="padding:20px">Nenhum banheiro ${todosB.length?'neste filtro':'cadastrado'}.</td></tr>`}</table></div></div>
- ${cardImportar('banheiros',`<p class="muted">Copie do Excel as colunas <b>TAG · Descrição · Frente · Localização · Data de disponibilização</b> e cole abaixo (uma linha por banheiro). TAGs que já existem são ignoradas.</p>
-  <textarea id="banLote" placeholder="BQ-001	Cabine masculino	FRENTE 1	Pátio oficina	10/11/2026"></textarea><button class="btn sec" data-act="ban-lote" style="margin-top:8px">${ic('upload')} Importar lote</button>`)}`;}
+  <td class="tbl-ac"><button class="btn ghost sm" data-act="editar-ban" data-id="${b.id}" title="Editar">${ic('edit')}</button><button class="btn ghost sm" data-act="ban-ativo" data-id="${b.id}" title="${b.ativo?'Inativar':'Ativar'}" style="color:${b.ativo?'#b07a00':'var(--ok)'}">${ic('power')}</button><button class="btn ghost sm" data-act="ban-excluir" data-id="${b.id}" title="Excluir (só sem histórico)" style="color:var(--err)">${ic('trash')}</button></td></tr>`;}).join('')||`<tr><td colspan="10" class="muted" style="padding:20px">Nenhum banheiro ${todosB.length?'neste filtro':'cadastrado'}.</td></tr>`}</table></div></div>
+ ${cardImportar('banheiros')}`;}
 function lerDataBR(s){s=String(s||'').trim();let m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);if(m){const y=m[3].length===2?'20'+m[3]:m[3];return `${y}-${pad(m[2])}-${pad(m[1])}`;}m=s.match(/^\d{4}-\d{2}-\d{2}$/);return m?s:'';}
 async function banSalvar(){const E=S.banEdit,tag=normTag($('#bTag').value),frente=$('#bFrente').value;
  if(!tag){toast('Informe a TAG','erro');return;}
@@ -1236,7 +1244,7 @@ function vEquipe(){const q=S.eqBusca.toLowerCase(),L=equipe().filter(p=>!q||Stri
  <div class="filtros" style="margin-top:14px"><div class="inp-ic f1">${ic('search')}<input id="eqBusca" placeholder="Buscar nome ou matrícula…" value="${h(S.eqBusca)}"></div><span class="tiny">${L.length} pessoa(s)</span></div>
  <div class="card p0"><div class="tbw"><table class="tb"><tr><th>Matrícula</th><th>Nome</th><th>Função</th><th>Turno</th><th>Perfil</th><th>Senha</th><th>Situação</th><th></th></tr>
  ${L.map(p=>`<tr><td>${h(p.matricula)}</td><td><b>${h(p.nome)}</b>${p._pend?' <span class="st pendente">Na fila</span>':''}</td><td>${h(p.funcao||'')}</td><td>${h(p.turno||'')}</td><td>${h(p.perfil||'LANÇADOR')}</td><td>${p.hash&&!p.trocarSenha?'<span class="st sincronizado">Pessoal</span>':'<span class="st pendente">Provisória</span>'}</td><td><span class="st ${p.ativo!==false?'sincronizado':'cancelado'}">${p.ativo!==false?'Ativo':'Inativo'}</span></td><td><button class="btn ghost sm" data-act="eq-editar" data-mat="${h(p.matricula)}">${ic('edit')}</button></td></tr>`).join('')||'<tr><td colspan="7" class="muted" style="padding:20px">Ninguém cadastrado.</td></tr>'}</table></div></div>
- ${cardImportar('equipe',`<p class="muted">Copie do Excel as colunas <b>Matrícula · Nome · Função · Turno (Diurno/Noturno/ADM) · Perfil · Senha inicial</b> e cole abaixo. Sem senha inicial, a senha provisória fica sendo a matrícula. Todos trocam no primeiro acesso.</p><textarea id="eqLote" placeholder="12345	JOÃO DA SILVA	Auxiliar de limpeza	Diurno	LANÇADOR	abc123"></textarea><button class="btn sec" data-act="eq-lote" style="margin-top:8px">${ic('upload')} Importar lote</button>`)}`;}
+ ${cardImportar('equipe')}`;}
 async function eqSalvar(){const mat=$('#eMat').value.trim(),nome=$('#eNome').value.trim().toUpperCase().replace(/\s+/g,' '),senha=$('#eSenha').value.trim();if(!mat||!nome){toast('Matrícula e nome são obrigatórios','erro');return;}
  if(S.eqEdit._novo&&equipe().some(p=>String(p.matricula)===mat)){toast('Matrícula já cadastrada','erro');return;}
  if(equipe().some(p=>normNome(p.nome)===normNome(nome)&&String(p.matricula)!==mat)){toast('Já existe outra pessoa com esse nome. Como o login é pelo nome, diferencie (ex.: acrescente o sobrenome).','erro');return;}
@@ -1304,6 +1312,16 @@ async function lerQR(){
 async function qrAbrir(destino){const t=await lerQR();if(!t)return;const b=banheiros().find(x=>x.tag===t);if(!b){toast(`TAG ${t} não cadastrada`,'erro');return;}
  if(destino==='form'&&S.form){S.form.banheiroId=b.id;S.form.frente=S.form.frente||b.frente;salvarRascunho();render();return;}
  ir('banheiro',{banId:b.id});}
+
+/* Excluir banheiro: só quando não tem nenhum registro (com histórico, o certo é inativar) */
+function temHistorico(b){return registros().some(r=>r.banheiroId===b.id||r.tag===b.tag)||sinalizacoes().some(x=>x.banheiroId===b.id);}
+async function excluirBanheiros(ids){
+ const bs=ids.map(banPorId).filter(Boolean),com=bs.filter(temHistorico),sem=bs.filter(b=>!temHistorico(b));
+ if(!sem.length){toast(com.length===1?`${com[0].tag} tem limpezas/reparos registrados. Use Inativar para manter o histórico.`:'Todos os selecionados têm histórico. Use Inativar.','erro');return;}
+ const msg=sem.length===1?`Excluir o banheiro ${sem[0].tag}? Esta ação não pode ser desfeita.`:`Excluir ${sem.length} banheiro(s)? Esta ação não pode ser desfeita.`+(com.length?` (${com.length} com histórico serão mantidos — use Inativar neles.)`:'');
+ if(!await confirmar(msg,'Excluir'))return;
+ for(const b of sem)await enfileirar('BANHEIRO_DEL',{id:b.id,tag:b.tag},'DEL');
+ sem.forEach(b=>S.banSel.delete(b.id));toast(`${sem.length} banheiro(s) excluído(s)`,'ok');render();}
 
 /* ------------------------------ Implantação da base: modelo Excel + importação ------------------------------ */
 const MODELOS={banheiros:{arq:'modelo_banheiros.xlsx',aba:'Banheiros',nome:'banheiros'},frentes:{arq:'modelo_frentes.xlsx',aba:'Frentes',nome:'frentes'},equipe:{arq:'modelo_equipe.xlsx',aba:'Equipe',nome:'pessoas'}};
@@ -1608,6 +1626,8 @@ const ACOES={
  'ban-sel':el=>{const id=el.dataset.id;S.banSel.has(id)?S.banSel.delete(id):S.banSel.add(id);render();},
  'ban-sel-todos':()=>{const q=normTag(S.banBusca);const L=banheiros().filter(b=>(!q||b.tag.includes(q)||normTag(b.descricao).includes(q))&&(!S.banFrente||(S.banFrente==='__sem'?!b.frente:b.frente===S.banFrente))&&(!S.banAtivo||(S.banAtivo==='1')===b.ativo));
   const todos=L.length&&L.every(b=>S.banSel.has(b.id));L.forEach(b=>todos?S.banSel.delete(b.id):S.banSel.add(b.id));render();},
+ 'ban-excluir':el=>excluirBanheiros([el.dataset.id]),
+ 'ban-sel-excluir':()=>excluirBanheiros([...S.banSel]),
  'ban-sel-limpar':()=>{S.banSel.clear();render();},
  'ban-sel-frente':async()=>{const fr=$('#selFrente').value;if(!fr){toast('Escolha a frente','erro');return;}const ids=[...S.banSel];
   if(!await confirmar(`Colocar ${ids.length} banheiro(s) na frente ${fr}?`,'Confirmar'))return;
