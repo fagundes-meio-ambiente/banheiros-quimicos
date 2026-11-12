@@ -1,6 +1,7 @@
 /* Service worker – mantém o app funcionando sem internet */
-const CACHE = 'fag-seguranca-v3.7.2';
-const ARQUIVOS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './logo-branco.png', './logo-azul.png', './simbolo-branco.png', './simbolo-azul.png', './login.jpg', './modelo_colaboradores.xlsx', './modelo_areas_frentes.xlsx'];
+const CACHE = 'fag-banheiros-v1.7.0';
+const ARQUIVOS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './logo-branco.png', './logo-azul.png', './simbolo-branco.png', './simbolo-azul.png', './login.jpg',
+  './lib/xlsx.min.js', './modelo_banheiros.xlsx', './modelo_frentes.xlsx', './modelo_equipe.xlsx', './lib/jspdf.min.js', './lib/autotable.min.js', './lib/qrcode.min.js'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ARQUIVOS.map(a => new Request(a, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
@@ -12,25 +13,31 @@ self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET' || u.origin !== location.origin) return; // servidor (Apps Script) nunca passa pelo cache
   const pagina = e.request.mode === 'navigate' || u.pathname.endsWith('/') || u.pathname.endsWith('.html');
   if (pagina) {
-    // Página do app: tenta a versão mais nova por até 3 s; com sinal fraco ou sem internet abre na hora a cópia guardada.
-    const rede = fetch(e.request, { cache: 'no-store' }).then(r => {
-      if (r && r.ok) { const cl = r.clone(); caches.open(CACHE).then(c => c.put('./index.html', cl)); }
-      return r;
-    });
-    const limite = new Promise(res => setTimeout(res, 3000));
-    e.respondWith(caches.match('./index.html').then(guardada => {
-      if (!guardada) return rede;                                   // primeira vez: precisa da internet
-      return Promise.race([rede.catch(() => guardada), limite.then(() => guardada)]);
+    // Página do app: abre NA HORA com a cópia guardada; a versão nova é baixada em segundo plano
+    // e entra na próxima vez que o app for aberto. Sem cópia guardada, busca na rede.
+    e.respondWith(caches.open(CACHE).then(async c => {
+      const guardada = await c.match('./index.html');
+      const rede = fetch(e.request, { cache: 'no-store' }).then(r => { if (r && r.ok) c.put('./index.html', r.clone()); return r; });
+      if (guardada) { e.waitUntil(rede.catch(() => {})); return guardada; }
+      return rede.catch(() => caches.match('./'));
     }));
-    e.waitUntil(rede.catch(() => {}));                              // continua atualizando em segundo plano
     return;
   }
-  // Imagens e modelos: usa a cópia guardada e atualiza em segundo plano.
+  // Imagens e bibliotecas: usa a cópia guardada e atualiza em segundo plano.
   e.respondWith(caches.match(e.request, { ignoreSearch: true }).then(cache => {
     const rede = fetch(e.request).then(r => {
       if (r && r.ok) { const cl = r.clone(); caches.open(CACHE).then(c => c.put(e.request, cl)); }
       return r;
     }).catch(() => cache);
     return cache || rede;
+  }));
+});
+
+// Toque no aviso de limpeza vencida: abre o app na lista de vencidos
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(cs => {
+    for (const c of cs) { if ('focus' in c) { c.navigate && c.navigate('./index.html#vencidos'); return c.focus(); } }
+    return self.clients.openWindow('./index.html#vencidos');
   }));
 });
