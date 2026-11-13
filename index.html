@@ -532,6 +532,7 @@ main.com-barra{padding-bottom:calc(96px + env(safe-area-inset-bottom))!important
 .vgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px}
 .vgrid .venc{margin:0}
 nav.bot button{min-width:0}
+.nova-versao{display:flex;gap:10px;align-items:center;background:#e6f4d2;border-bottom:1px solid #c9e4a4;padding:8px 16px;font-size:13.5px;color:#2d4a0e}.nova-versao svg.i{width:20px;height:20px;color:#1f8f3a;flex:none}
 
 </style>
 </head>
@@ -548,7 +549,7 @@ nav.bot button{min-width:0}
    Perfis: LANÇADOR (lança, consulta status e histórico) e
            ADMINISTRADOR (vê tudo: painel, cadastros, relatórios).
    ===================================================================== */
-const APP_VERSION='1.9.0';
+const APP_VERSION='1.9.1';
 const TURNOS=['Diurno','Noturno'];
 const TURNOS_EQ=['Diurno','Noturno','ADM'];
 const PERFIS=['LANÇADOR','ADMINISTRADOR'];
@@ -659,7 +660,7 @@ function _tag(url){return new Promise((res,rej)=>{const s=document.createElement
 async function carregarScript(src){const [glob,cdn]=LIBS[src]||[null,null];
  if(_libOk[src]&&(!glob||window[glob]))return;
  if(glob&&window[glob]){_libOk[src]=true;return;}
- try{await _tag(src+'?v='+APP_VERSION);if(!glob||window[glob]){_libOk[src]=true;return;}}catch(e){}
+ for(const u of [src,src.replace('lib/','')]){try{await _tag(u+'?v='+APP_VERSION);if(!glob||window[glob]){_libOk[src]=true;return;}}catch(e){}}
  if(cdn){try{await _tag(cdn);if(!glob||window[glob]){_libOk[src]=true;return;}}catch(e){}}
  throw new Error('Não consegui carregar o componente '+src.replace('lib/','')+'. Confira se a pasta "lib" foi enviada ao GitHub e abra o app com internet.');}
 
@@ -910,6 +911,19 @@ async function verificarOffline(){
  try{const r=await caches.match(new URL('index.html',location.href).href)||await caches.match(new URL('./',location.href).href);const ctrl=!!navigator.serviceWorker.controller;
   const ant=S.offOk;S.offOk=!!r&&ctrl;if(ant!==S.offOk&&S.user&&['lancar','config'].includes(S.tela))redesenharSePuder();}catch(e){S.offOk=null;}}
 
+/* Versão nova publicada no GitHub? Compara com a versão aberta e oferece atualizar (os dados do aparelho não são apagados) */
+async function verificarVersao(){
+ if(window.DEMO_API||!online()||!location.protocol.startsWith('http'))return;
+ try{const r=await fetch('index.html?verificar='+Date.now(),{cache:'no-store'});if(!r.ok)return;const t=await r.text();const m=t.match(/APP_VERSION='([\d.]+)'/);
+  const nova=m&&m[1];const ant=S.versaoNova;S.versaoNova=nova&&nova!==APP_VERSION?nova:null;if(ant!==S.versaoNova&&S.user)redesenharSePuder();}catch(e){}}
+async function atualizarApp(){
+ const pend=S.fila.filter(r=>r.status==='pendente').length+S.fotosPend;
+ if(pend&&!await confirmar(`Há ${pend} item(ns) aguardando envio. Eles continuam guardados neste aparelho durante a atualização. Atualizar agora?`,'Atualizar'))return;
+ toast('Atualizando…');
+ try{if('caches' in window){const ks=await caches.keys();await Promise.all(ks.map(k=>caches.delete(k)));}}catch(e){}
+ try{const regs=navigator.serviceWorker?await navigator.serviceWorker.getRegistrations():[];await Promise.all(regs.map(r=>r.unregister()));}catch(e){}
+ location.replace(location.pathname+'?atualizado='+Date.now());}
+
 /* ------------------------------ Login ------------------------------ */
 async function entrar(){
  const mat=$('#lgMat').value.trim(),senha=$('#lgSenha').value;
@@ -968,6 +982,7 @@ function render(){
  <div class="col"><header><div class="logo">${MARCA()}</div><div class="htit"><b>${TIT[S.tela]||''}</b><span>Banheiros Químicos · ${h(S.cfg.unidade||'')}</span></div>
   <div class="pill" id="pill"><i></i><span></span></div>
   <button class="uchip" data-act="menu-user"><span class="av">${iniciais(S.user.nome)}</span><small>${h(primeiro(S.user.nome))}</small></button></header>
+ ${S.versaoNova?`<div class="nova-versao">${ic('download')}<span class="f1">Nova versão <b>${h(S.versaoNova)}</b> disponível (você está na ${APP_VERSION}).</span><button class="btn sm vd" data-act="atualizar-app">Atualizar agora</button></div>`:''}
  <main class="${['form','lancar','fila','registro'].includes(S.tela)?'estreito':''} ${S.tela==='form'?'com-barra':''}" id="app">${v()}</main></div></div>
  <nav class="bot ${S.tela==='form'?'oculta':''}">${navM.map(([k,l,i])=>`<button class="${atv(k)?'at':''}" data-act="nav" data-to="${k}">${ic(i)}${l}${bd(k)}</button>`).join('')}</nav>`;
  renderStatus();
@@ -1391,7 +1406,8 @@ function vConfig(){
  <div class="card c6"><h2>Este aparelho</h2><table class="tb">
   <tr><td>Usuário</td><td><b>${h(S.user.nome)}</b> · ${h(S.user.perfil)}</td></tr><tr><td>Código do aparelho</td><td><b>${S.deviceId.slice(0,4).toUpperCase()}</b></td></tr>
   <tr><td>Itens na fila</td><td>${S.fila.filter(r=>r.status==='pendente').length} pendente(s) · ${S.fotosPend} foto(s)</td></tr><tr><td>Registros baixados</td><td>${S.srvRegs.length}</td></tr>
-  <tr><td>Uso sem internet</td><td>${S.offOk?'✔ Pronto':S.offOk===false?'⏳ Preparando (abra com internet)':'—'}</td></tr><tr><td>Armazenamento permanente</td><td>${S.persist?'✔ Garantido':S.persist===false?'⚠ Não garantido':'—'}</td></tr><tr><td>Versão</td><td>${APP_VERSION}</td></tr></table>
+  <tr><td>Uso sem internet</td><td>${S.offOk?'✔ Pronto':S.offOk===false?'⏳ Preparando (abra com internet)':'—'}</td></tr><tr><td>Armazenamento permanente</td><td>${S.persist?'✔ Garantido':S.persist===false?'⚠ Não garantido':'—'}</td></tr><tr><td>Versão</td><td>${APP_VERSION}${S.versaoNova?` · <b style="color:var(--ok)">nova ${h(S.versaoNova)} disponível</b>`:''}</td></tr></table>
+  <button class="btn sec bl" data-act="atualizar-app" style="margin-top:12px">${ic('sync')} Atualizar app agora (não apaga dados)</button>
   ${S.instalar?`<button class="btn vd bl" data-act="instalar" style="margin-top:12px">Instalar app na tela inicial</button>`:''}
   <div class="row" style="margin-top:12px"><button class="btn sec f1" data-act="exportar">${ic('download')} Backup deste aparelho</button><button class="btn sec f1" data-act="importar">${ic('upload')} Importar backup</button></div>
   <div class="row" style="margin-top:8px"><button class="btn sec f1" data-act="rebaixar">${ic('sync')} Baixar tudo de novo do servidor</button></div></div></div>`;}
@@ -1727,6 +1743,7 @@ const ACOES={
   if(r.tipo==='REGISTRO'&&r.dados.fotos)await apaga('fotos',r.dados.fotos.map(f=>f.id));await apaga('fila',r.id);await recarregarFila();await recarregarFotosPend();invalidar();render();},
  'vfr':el=>{S.vFrente=el.dataset.k;render();},
  'ativar-alerta':()=>ativarAlerta(),
+ 'atualizar-app':()=>atualizarApp(),
  'gran':el=>{S.gran=el.dataset.g;render();},
  'limpar-filtros':()=>{S.fTurno=S.fFrente=S.fTag=S.fTipo='';render();},
  'h-mais':()=>{S.hLim+=200;render();},
@@ -1797,7 +1814,7 @@ async function init(){
  try{
   S.deviceId=await getMeta('deviceId');if(!S.deviceId){S.deviceId=uuid();await setMeta('deviceId',S.deviceId);}
   S.cfg=Object.assign(S.cfg,await getMeta('cfg',{}));
-  try{const q=new URLSearchParams(location.search),s=q.get('s'),k=q.get('k');let mud=false;if(s&&/^https:\/\//.test(s)&&(!S.cfg.apiUrl||S.cfg.apiUrl===s)){S.cfg.apiUrl=s;mud=true;}if(k&&(!S.cfg.key||S.cfg.apiUrl===s)){S.cfg.key=k;mud=true;}if(mud)await setMeta('cfg',S.cfg);if(s||k)history.replaceState(null,'',location.pathname);}catch(e){}
+  try{const q=new URLSearchParams(location.search),s=q.get('s'),k=q.get('k');let mud=false;if(s&&/^https:\/\//.test(s)&&(!S.cfg.apiUrl||S.cfg.apiUrl===s)){S.cfg.apiUrl=s;mud=true;}if(k&&(!S.cfg.key||S.cfg.apiUrl===s)){S.cfg.key=k;mud=true;}if(mud)await setMeta('cfg',S.cfg);if(s||k||q.get('atualizado'))history.replaceState(null,'',location.pathname);}catch(e){}
   S.user=await getMeta('user',null);S.auth=await getMeta('auth',null);S.lastSync=await getMeta('lastSync',null);S.lastPull=await getMeta('lastPull',null);S.seq=await getMeta('seq',0);
   S.equipeSrv=await getMeta('equipe',[]);S.frentesSrv=await getMeta('frentes',[]);S.banheirosSrv=await getMeta('banheiros',[]);S.configSrv=await getMeta('config',{});S.aparelhos=await getMeta('aparelhos',[]);S.fotosIdx=await getMeta('fotosIdx',{});
   S.rascunhos=await getMeta('rascunhos',[]);
@@ -1811,6 +1828,7 @@ async function init(){
  if('serviceWorker' in navigator&&location.protocol.startsWith('http')&&!window.DEMO_API){navigator.serviceWorker.register('sw.js').catch(()=>{});
   navigator.serviceWorker.addEventListener('controllerchange',()=>setTimeout(verificarOffline,1500));}
  verificarOffline();setTimeout(verificarOffline,8000);setTimeout(verificarOffline,30000);
+ setTimeout(verificarVersao,3000);setInterval(verificarVersao,15*60000);
  S.tela=location.hash==='#vencidos'?'vencidos':(isAdm()?'painel':'lancar');
  render();
  setInterval(()=>{if(S.user)sincronizar();},90000);
