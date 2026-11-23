@@ -549,7 +549,7 @@ nav.bot button{min-width:0}
    Perfis: LANÇADOR (lança, consulta status e histórico) e
            ADMINISTRADOR (vê tudo: painel, cadastros, relatórios).
    ===================================================================== */
-const APP_VERSION='1.9.1';
+const APP_VERSION='1.9.2';
 const TURNOS=['Diurno','Noturno'];
 const TURNOS_EQ=['Diurno','Noturno','ADM'];
 const PERFIS=['LANÇADOR','ADMINISTRADOR'];
@@ -934,8 +934,13 @@ async function entrar(){
   else ok=S.cfg.masterHash?S.cfg.masterHash===hs:false;
   if(!ok){toast(S.cfg.masterHash||online()?'Senha do administrador geral incorreta':'Primeiro acesso do administrador geral precisa de internet','erro');return;}
   await iniciarSessao({matricula:'admin',nome:'ADMINISTRADOR GERAL',funcao:'Administrador',turno:'ADM',perfil:'ADMINISTRADOR'},{master:true,pin:senha});return;}
+ if(!S.equipeSrv.length||!equipe().some(x=>normNome(x.nome)===normNome(mat))){
+  if(temServidor()&&online()){const bt=$('[data-act=entrar]');if(bt){bt.disabled=true;bt.textContent='Baixando cadastro…';}
+   try{await baixarCadastro();}catch(e){if(bt){bt.disabled=false;bt.innerHTML='Entrar '+ic('right');}toast('Não consegui baixar o cadastro: '+e.message,'erro');return;}
+   if(bt){bt.disabled=false;bt.innerHTML='Entrar '+ic('right');}}
+  else if(!S.equipeSrv.length){toast(temServidor()?'Este aparelho está sem o cadastro da equipe. Conecte à internet (Wi-Fi ou dados) e toque em Entrar de novo.':'Aparelho sem servidor configurado. Abra pelo link enviado pelo administrador.','erro');return;}}
  const ps=equipe().filter(x=>normNome(x.nome)===normNome(mat)),p=ps.find(x=>x.ativo!==false)||ps[0];
- if(!p){toast(S.equipeSrv.length?'Usuário não encontrado. Digite o nome completo como foi cadastrado.':'Cadastro ainda não baixado neste aparelho — conecte à internet uma vez.','erro');return;}
+ if(!p){toast(S.equipeSrv.length?'Usuário não encontrado. Digite o nome completo como foi cadastrado.':'Cadastro não encontrado neste aparelho. Conecte à internet e tente de novo.','erro');return;}
  if(p.ativo===false){toast('Acesso desativado. Procure o administrador.','erro');return;}
  const hs=await hashSenha(p.matricula,senha),esperado=p.hash||await hashSenha(p.matricula,p.matricula);
  if(hs!==esperado){toast('Senha incorreta','erro');$('#lgSenha').value='';return;}
@@ -1003,6 +1008,7 @@ function vLogin(){
   <div class="campo"><label>Usuário</label><div class="inp-ic">${ic('user')}<input id="lgMat" list="dlNomes" autocomplete="username" autocapitalize="characters" placeholder="Seu nome completo"></div>${dl('dlNomes',equipe().filter(p=>p.ativo!==false).map(p=>p.nome))}</div>
   <div class="campo"><label>Senha</label><div class="inp-ic senha">${ic('lock')}<input id="lgSenha" type="${S.verSenha?'text':'password'}" autocomplete="current-password" placeholder="Sua senha"><button type="button" data-act="ver-senha" aria-label="Mostrar senha">${ic(S.verSenha?'eyeoff':'eye')}</button></div></div>
   <button class="btn bl lg-btn" data-act="entrar">Entrar ${ic('right')}</button>
+  ${!S.equipeSrv.length?`<div class="aviso" style="margin-top:14px">${ic('alert')}<div class="f1">Este aparelho está <b>sem o cadastro da equipe</b>${S.lastErr?` (último erro: ${h(S.lastErr)})`:''}. ${online()?'Toque em <b>Baixar cadastro</b> ou simplesmente em Entrar.':'Conecte à internet para baixar.'}${online()?`<div style="margin-top:8px"><button class="btn sm" data-act="baixar-cadastro">${ic('download')} Baixar cadastro</button></div>`:''}</div></div>`:''}
   <div class="row" style="justify-content:space-between;margin-top:16px"><span class="tiny"><i class="dot ${online()?'on':''}"></i>${online()?'Online':'Offline'} · ${S.equipeSrv.length} pessoa(s) no aparelho</span><button class="btn ghost sm" data-act="abrir-setup">${ic('gear')} Aparelho</button></div>
   ${window.DEMO_HINT||''}</div></div></div>`;}
 function vSetup(){
@@ -1701,6 +1707,8 @@ const ACOES={
  'entrar':()=>entrar(),
  'ver-senha':()=>{const v=$('#lgMat').value,s=$('#lgSenha').value;S.verSenha=!S.verSenha;render();$('#lgMat').value=v;$('#lgSenha').value=s;},
  'abrir-setup':()=>{S.setup=true;render();},
+ 'baixar-cadastro':async el=>{el.disabled=true;el.textContent='Baixando…';try{await baixarCadastro();S.lastErr='';toast(`Cadastro baixado: ${S.equipeSrv.length} pessoa(s)`,'ok');}catch(e){S.lastErr=e.message;toast('Não consegui baixar: '+e.message,'erro');}
+  const n=$('#lgMat')?$('#lgMat').value:'';render();if($('#lgMat'))$('#lgMat').value=n;},
  'fechar-setup':()=>{S.setup=false;render();},
  'salvar-setup':async()=>{const u=$('#stUrl').value.trim();
   if(S.cfg.apiUrl&&u!==S.cfg.apiUrl){const pin=$('#stPin')?.value||'';const hs=await hashSenha('admin',pin);let ok=S.cfg.masterHash&&S.cfg.masterHash===hs;
